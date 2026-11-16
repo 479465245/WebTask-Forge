@@ -1,0 +1,9 @@
+fastapi>=0.115,<1
+uvicorn[standard]>=0.34,<1
+playwright>=1.50,<2
+SQLAlchemy>=2.0,<3
+psycopg[binary]>=3.2,<4
+croniter>=6,<7
+pytesseract>=0.3.13,<1
+Pillow>=10,<13
+opencv-python-headless>=4.10,<5

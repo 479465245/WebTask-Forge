@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.py[cod]
+.browser-data/
+automation.db
+*.db-shm
+*.db-wal
+.app.pid
+app.log
+app.stdout.log
+app.stderr.log
+/automation_processors/

@@ -1,0 +1,26 @@
+[Unit]
+Description=Automation Workbench
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=automation
+Group=automation
+WorkingDirectory=/opt/automation-workbench
+EnvironmentFile=/etc/automation-workbench.env
+Environment=HOME=/var/lib/automation-workbench
+Environment=PLAYWRIGHT_BROWSERS_PATH=/var/lib/automation-workbench/ms-playwright
+Environment=BROWSER_DATA_DIR=/var/lib/automation-workbench/profile
+ExecStart=/opt/automation-workbench/.venv/bin/python /opt/automation-workbench/app.py
+StateDirectory=automation-workbench
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/automation-workbench
+
+[Install]
+WantedBy=multi-user.target
