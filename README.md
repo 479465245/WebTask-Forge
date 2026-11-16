@@ -1,6 +1,6 @@
-# 自动化任务工作台
+# WebTask Forge（网页自动化工坊）
 
-基于 FastAPI、Playwright 和 PostgreSQL 的内部网页自动化平台。Linux 上运行单个持久 Chromium 浏览器进程，各任务实例使用独立标签页并共享该浏览器上下文中的 Cookie/localStorage。每个任务只允许一个尚未结束的实例；不同任务可并行。运行详情页通过 WebSocket 显示实时画面，默认只读，解锁后可操作。
+基于 FastAPI、Playwright 和 PostgreSQL 的自托管网页自动化工作台。Linux 上运行单个持久 Chromium 浏览器进程，各任务实例使用独立标签页并共享该浏览器上下文中的 Cookie/localStorage。每个任务只允许一个尚未结束的实例；不同任务可并行。运行详情页通过 WebSocket 显示实时画面，默认只读，解锁后可操作。
 
 ## 能力
 
@@ -81,6 +81,10 @@ HTTP API 使用 Basic Auth。主要路径：
 
 
 关键节点执行后会自动保存一张 JPEG 画面，运行详情可查看。默认保存在 BROWSER_DATA_DIR 所在目录的 artifacts 子目录；可用 ARTIFACTS_DIR 单独指定。请将截图目录纳入受限权限的持久化存储和备份策略。
+
+## 许可证
+
+本项目源码采用 GNU Affero General Public License v3.0（AGPL-3.0-only），完整条款见 [LICENSE](LICENSE)。第三方依赖遵循各自的许可证。
 
 ## 请作者喝杯咖啡
 

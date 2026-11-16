@@ -226,7 +226,7 @@ async def lifespan(_app: FastAPI):
         await browser.stop()
 
 
-app = FastAPI(title="网页自动处理平台", lifespan=lifespan)
+app = FastAPI(title="WebTask Forge | 网页自动化工坊", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 
 

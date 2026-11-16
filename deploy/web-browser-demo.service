@@ -1,5 +1,5 @@
 [Unit]
-Description=Automation Workbench
+Description=WebTask Forge - Self-hosted web automation workbench
 After=network-online.target
 Wants=network-online.target
 
