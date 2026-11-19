@@ -6,7 +6,8 @@
   body { font-size: 16px; }
   .topbar { height: 60px; padding: 0 16px; }
   .brand-name { font-size: 16px; }
-  .topbar-right { font-size: 14px; }
+  .topbar-right { gap: 8px; font-size: 14px; }
+  #clear-browser-storage { padding: 0 8px; font-size: 11px; white-space: nowrap; }
   .workspace { width: calc(100% - 24px); }
   .intro { padding: 30px 0 20px; }
   .intro h1 { margin: 12px 0 8px; font-size: clamp(27px, 7vw, 34px); }
@@ -82,4 +83,8 @@
   .dialog-heading h2 { font-size: 19px; }
   .page-footer { height: auto; min-height: 58px; gap: 12px; font-size: 12px; }
   .footer-mark { font-size: 10px; }
+}
+
+@media (max-width: 380px) {
+  .secure-label { display: none; }
 }

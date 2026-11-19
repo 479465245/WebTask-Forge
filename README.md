@@ -1,6 +1,6 @@
 # WebTask Forge（网页自动化工坊）
 
-基于 FastAPI、Playwright 和 PostgreSQL 的自托管网页自动化工作台。Linux 上运行单个持久 Chromium 浏览器进程，各任务实例使用独立标签页并共享该浏览器上下文中的 Cookie/localStorage。每个任务只允许一个尚未结束的实例；不同任务可并行。运行详情页通过 WebSocket 显示实时画面，默认只读，解锁后可操作。
+基于 FastAPI、Playwright 和 PostgreSQL 的自托管网页自动化工作台。Windows 和 Linux 均运行 Playwright 管理的 Chromium 浏览器进程；各任务实例使用独立标签页并共享该浏览器上下文中的 Cookie/localStorage。每个任务只允许一个尚未结束的实例；不同任务可并行。运行详情页通过 WebSocket 显示实时画面，默认只读，解锁后可操作。
 
 ## 能力
 
@@ -36,7 +36,7 @@ Debian/Ubuntu 安装 OCR 引擎和英文、简体中文语言包：`sudo apt-get
 
 安装后运行 `tesseract --version` 和 `tesseract --list-langs`，确认引擎可启动且列表包含 `eng`、`chi_sim`。Python 依赖仍通过 `pip install -r requirements.txt` 安装；其中 `pytesseract` 只是 Python 调用封装，不会安装 Tesseract 可执行文件或语言数据。
 
-应用通过 `DATABASE_URL` 环境变量读取数据库连接地址；本地 PostgreSQL 18 Docker 容器使用本机 5433 端口。应用默认监听 127.0.0.1:8765，也可设置 BROWSER_DEMO_HOST、BROWSER_DEMO_PORT、BROWSER_DATA_DIR、BROWSER_HEADLESS 调整运行配置。restart.ps1 / restart.sh 在没有已运行 systemd 服务时会在后台启动本地应用；stop.ps1 / stop.sh 停止应用。日志写入项目目录中的 app.stdout.log、app.stderr.log（Windows）或 app.log（Linux）。Linux 若以 systemd 运行，会优先通过 systemd 重启或停止服务。
+应用通过 `DATABASE_URL` 环境变量读取数据库连接地址；本地 PostgreSQL 18 Docker 容器使用本机 5433 端口。应用默认监听 127.0.0.1:8765，也可设置 `BROWSER_DEMO_HOST`、`BROWSER_DEMO_PORT`、`BROWSER_DATA_DIR`、`BROWSER_HEADLESS` 调整运行配置。浏览器默认以无头模式运行；设置 `BROWSER_HEADLESS=false` 可显示 Playwright 管理的 Chromium 窗口。浏览器使用项目的 `.browser-data` 用户目录，请求默认使用 Edge 157 / Windows 的 User-Agent 与 Client Hints。restart.ps1 / restart.sh 在没有已运行 systemd 服务时会在后台启动本地应用；stop.ps1 / stop.sh 停止应用。日志写入项目目录中的 app.stdout.log、app.stderr.log（Windows）或 app.log（Linux）。Linux 若以 systemd 运行，会优先通过 systemd 重启或停止服务。
 
 首次启动会在 `DATABASE_URL` 指定的 PostgreSQL 数据库中创建表；未设置该环境变量时应用会提示配置错误，且不会回退到 SQLite。局域网部署设置 BROWSER_DEMO_HOST=0.0.0.0，并配置强随机 BROWSER_DEMO_USERNAME 和 BROWSER_DEMO_PASSWORD。应用使用 HTTP Basic Auth；HTTPS 由可信反向代理提供并转发 WebSocket Upgrade。防火墙应限制访问来源。
 
@@ -63,6 +63,7 @@ HTTP API 使用 Basic Auth。主要路径：
 - GET/POST /api/tasks，PUT/DELETE /api/tasks/{id}：任务定义。
 - POST /api/tasks/{id}/runs：创建实例，可提交 {"data":{...}} 启动数据。
 - GET /api/runs，GET /api/runs/{id}，DELETE /api/runs/{id}：运行及节点记录；删除运行记录会停止活动实例、清理节点和网络数据及截图，并关闭对应浏览器标签页；共享浏览器上下文中的 Cookie/localStorage 会保留。详情接口可用 include_nodes=false 仅读取运行信息。
+- DELETE /api/browser-storage：清除自动化浏览器的 Cookie、缓存和本地存储；有运行实例或录制进行时返回 409，任务与运行历史保留。
 - GET /api/runs/{id}/nodes：节点执行记录，支持 page 和 page_size，默认每页 10 条，按开始时间倒序。
 - GET /api/recordings：录制列表；GET /api/recordings/{id}：录制操作、截图和网络事件；POST /api/recordings/{id}/save：命名保存草稿；DELETE /api/recordings/{id}：删除录制及截图。
 - GET /api/runs/{id}/network：网络事件默认支持 page 和 page_size，默认每页 10 条，按开始时间倒序；传入 after_id 和 limit 时保留增量读取模式。

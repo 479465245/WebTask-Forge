@@ -5,7 +5,9 @@ import base64
 import hmac
 import ipaddress
 import json
+import logging
 import os
+import shutil
 from contextlib import asynccontextmanager
 from datetime import timezone
 from pathlib import Path
@@ -27,10 +29,34 @@ from network_capture import NetworkCapture, _safe_url
 import workflow
 
 ROOT = Path(__file__).parent
+logger = logging.getLogger(__name__)
 HOST = os.environ.get("BROWSER_DEMO_HOST", "127.0.0.1")
 PORT = int(os.environ.get("BROWSER_DEMO_PORT", "8765"))
 USERNAME = os.environ.get("BROWSER_DEMO_USERNAME", "")
 PASSWORD = os.environ.get("BROWSER_DEMO_PASSWORD", "")
+EDGE_157_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36 Edg/157.0.0.0"
+)
+EDGE_157_USER_AGENT_METADATA = {
+    "brands": [
+        {"brand": "Not-A.Brand", "version": "99"},
+        {"brand": "Microsoft Edge", "version": "157"},
+        {"brand": "Chromium", "version": "157"},
+    ],
+    "fullVersionList": [
+        {"brand": "Not-A.Brand", "version": "99.0.0.0"},
+        {"brand": "Microsoft Edge", "version": "157.0.0.0"},
+        {"brand": "Chromium", "version": "157.0.0.0"},
+    ],
+    "platform": "Windows",
+    "platformVersion": "10.0.0",
+    "architecture": "x86",
+    "model": "",
+    "mobile": False,
+    "bitness": "64",
+    "wow64": False,
+}
 
 
 def loopback(host: str) -> bool:
@@ -82,6 +108,7 @@ class BrowserRuntime:
         self.connections: dict[int, set[WebSocket]] = {}
         self._closing = False
         self._recovering = False
+        self._clearing_storage = False
 
     async def start(self):
         self.playwright = await async_playwright().start()
@@ -95,7 +122,7 @@ class BrowserRuntime:
         self.context.on("close", self._context_closed)
 
     def _context_closed(self):
-        if not self._closing and not self._recovering:
+        if not self._closing and not self._recovering and not self._clearing_storage:
             asyncio.create_task(self.recover())
 
     async def recover(self):
@@ -123,42 +150,112 @@ class BrowserRuntime:
         if self.playwright:
             await self.playwright.stop()
 
+    async def clear_stored_data(self):
+        if self._clearing_storage:
+            raise RuntimeError("浏览器存储正在清理，请稍后重试。")
+        if not self.context or not self.playwright:
+            raise RuntimeError("浏览器当前不可用，请先启动浏览器服务。")
+
+        self._clearing_storage = True
+        cookie_count = len(await self.context.cookies())
+        try:
+            for capture in list(self.network_captures.values()):
+                await capture.close()
+            self.network_captures.clear()
+
+            for connections in list(self.connections.values()):
+                for connection in tuple(connections):
+                    try:
+                        await connection.close(code=1001, reason="浏览器存储已清理")
+                    except Exception:
+                        pass
+
+            await self.context.close()
+            await self.playwright.stop()
+            self.context = None
+            self.playwright = None
+            self.pages.clear()
+            self.mobile_sessions.clear()
+            self.recordings.clear()
+            self.locks.clear()
+            self.controllers.clear()
+            self.connections.clear()
+            workflow.pages.clear()
+
+            profile = Path(os.environ.get("BROWSER_DATA_DIR", str(ROOT / ".browser-data"))).resolve()
+            default_profile = profile / "Default"
+            cache_paths = (
+                default_profile / "Cache",
+                default_profile / "Code Cache",
+                default_profile / "GPUCache",
+                default_profile / "Network" / "Cache",
+                default_profile / "Service Worker" / "CacheStorage",
+                default_profile / "Service Worker" / "ScriptCache",
+            )
+            local_storage_path = default_profile / "Local Storage"
+            cookie_files = tuple(
+                default_profile / relative / filename
+                for relative in (Path("."), Path("Network"))
+                for filename in ("Cookies", "Cookies-journal", "Cookies-wal", "Cookies-shm")
+            )
+
+            def remove_profile_path(path: Path) -> int:
+                if path.is_symlink():
+                    return 0
+                resolved = path.resolve()
+                if profile not in resolved.parents and resolved != profile:
+                    return 0
+                if path.is_dir():
+                    size = sum(item.stat().st_size for item in path.rglob("*") if item.is_file())
+                    shutil.rmtree(path)
+                    return size
+                if path.is_file():
+                    size = path.stat().st_size
+                    path.unlink()
+                    return size
+                return 0
+
+            cache_bytes = sum(remove_profile_path(path) for path in cache_paths)
+            local_storage_bytes = remove_profile_path(local_storage_path)
+            cookie_bytes = sum(remove_profile_path(path) for path in cookie_files)
+
+            await self.start()
+            return {
+                "cookiesRemoved": cookie_count,
+                "cookieBytesRemoved": cookie_bytes,
+                "cacheBytesRemoved": cache_bytes,
+                "localStorageBytesRemoved": local_storage_bytes,
+            }
+        finally:
+            self._clearing_storage = False
+
     async def new_page(self, run_id: int, width: int, height: int, device_mode: str = "desktop"):
         page = await self.context.new_page()
         capture = NetworkCapture(run_id)
         capture.attach(page)
         self.network_captures[run_id] = capture
         await page.set_viewport_size({"width": width, "height": height})
-        if device_mode == "mobile":
-            session = await self.context.new_cdp_session(page)
-            try:
+        session = await self.context.new_cdp_session(page)
+        try:
+            await session.send("Emulation.setUserAgentOverride", {
+                "userAgent": EDGE_157_USER_AGENT,
+                "acceptLanguage": "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+                "platform": "Windows",
+                "userAgentMetadata": EDGE_157_USER_AGENT_METADATA,
+            })
+            if device_mode == "mobile":
                 await session.send("Emulation.setDeviceMetricsOverride", {
                     "width": width, "height": height, "deviceScaleFactor": 1, "mobile": True,
                     "screenOrientation": {"type": "portraitPrimary", "angle": 0},
                 })
                 await session.send("Emulation.setTouchEmulationEnabled", {"enabled": True, "maxTouchPoints": 5})
-                user_agent = await page.evaluate("navigator.userAgent")
-                for desktop_platform in ("Windows NT 10.0; Win64; x64", "Macintosh; Intel Mac OS X 10_15_7", "X11; Linux x86_64"):
-                    user_agent = user_agent.replace(desktop_platform, "Linux; Android 14; Pixel 8")
-                if " Mobile Safari/" not in user_agent:
-                    user_agent = user_agent.replace(" Safari/", " Mobile Safari/")
-                user_agent_data = await page.evaluate("navigator.userAgentData ? navigator.userAgentData.toJSON() : null")
-                override = {"userAgent": user_agent}
-                if user_agent_data:
-                    override["userAgentMetadata"] = {
-                        "brands": user_agent_data.get("brands", []),
-                        "fullVersionList": user_agent_data.get("fullVersionList", []),
-                        "platform": "Android", "platformVersion": "14.0.0",
-                        "architecture": "arm", "model": "Pixel 8", "mobile": True,
-                        "bitness": "64", "wow64": False,
-                    }
-                await session.send("Emulation.setUserAgentOverride", override)
-            except Exception:
-                await session.detach()
-                await page.close()
-                await capture.close()
-                self.network_captures.pop(run_id, None)
-                raise
+        except Exception:
+            await session.detach()
+            await page.close()
+            await capture.close()
+            self.network_captures.pop(run_id, None)
+            raise
+        if session:
             self.mobile_sessions[run_id] = session
         self.pages[run_id] = page
         self.locks[run_id] = asyncio.Lock()
@@ -166,7 +263,10 @@ class BrowserRuntime:
         return page
 
     async def close_page(self, run_id: int):
-        await stop_recording(run_id)
+        try:
+            await stop_recording(run_id)
+        except Exception as error:
+            logger.warning("recording cleanup failed run_id=%s error_type=%s", run_id, type(error).__name__)
         page = self.pages.pop(run_id, None)
         session = self.mobile_sessions.pop(run_id, None)
         capture = self.network_captures.pop(run_id, None)
@@ -175,15 +275,27 @@ class BrowserRuntime:
         connections = self.connections.pop(run_id, set())
         for connection in tuple(connections):
             try:
-                await connection.close(code=1001, reason="运行实例已关闭")
+                await connection.close(code=4000, reason="运行实例已结束")
             except Exception:
                 pass
         if session:
-            await session.detach()
+            try:
+                await session.detach()
+            except Exception as error:
+                logger.warning("mobile session cleanup failed run_id=%s error_type=%s",
+                               run_id, type(error).__name__)
         if page and not page.is_closed():
-            await page.close()
+            try:
+                await page.close()
+            except Exception as error:
+                logger.warning("browser page cleanup failed run_id=%s error_type=%s",
+                               run_id, type(error).__name__)
         if capture:
-            await capture.close()
+            try:
+                await capture.close()
+            except Exception as error:
+                logger.warning("network capture cleanup failed run_id=%s error_type=%s",
+                               run_id, type(error).__name__)
 
     async def goto(self, run_id: int, address: object):
         url = valid_url(address)
@@ -448,6 +560,21 @@ async def get_nodes():
 @app.get("/api/settings")
 async def get_settings():
     return {"timezone": os.getenv("TZ", "server local"), "max_parallel_tasks": "unlimited"}
+
+
+@app.delete("/api/browser-storage")
+async def clear_browser_storage():
+    with Session() as session:
+        active_run = session.scalar(select(Run.id).where(Run.status.in_(workflow.ACTIVE)).limit(1))
+        active_recording = session.scalar(select(Recording.id).where(Recording.status == "recording").limit(1))
+    if active_run or active_recording:
+        raise HTTPException(409, "有运行实例或录制正在进行，请结束后再清理浏览器存储。")
+    try:
+        return await browser.clear_stored_data()
+    except RuntimeError as error:
+        raise HTTPException(409, str(error)) from error
+    except Exception as error:
+        raise HTTPException(500, "清理浏览器存储失败，请检查服务日志。") from error
 
 
 @app.get("/api/tasks")

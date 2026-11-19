@@ -193,6 +193,8 @@ async def _capture_node(run_id: int, execution_id: int) -> str | None:
 
 
 async def start_run(task_id: int, start_data: dict | None = None) -> int | None:
+    if runtime and getattr(runtime, "_clearing_storage", False):
+        raise ValueError("浏览器存储正在清理，请稍后重试。")
     with Session() as session:
         task = session.get(Task, task_id)
         if not task:
@@ -208,10 +210,11 @@ async def start_run(task_id: int, start_data: dict | None = None) -> int | None:
         snapshot["viewport_width"] = task.viewport_width
         snapshot["viewport_height"] = task.viewport_height
         initial_global_data = task.initial_global_data or {}
+        run_global_data = initial_global_data if start_data is None else start_data
         start_data = start_data or {}
         snapshot["initial_global_data"] = json.loads(json.dumps(initial_global_data))
         run = Run(task_id=task_id, task_name=task.name, status="running", start_data=start_data,
-                  global_data={**initial_global_data, **start_data}, definition_snapshot=snapshot)
+                  global_data=json.loads(json.dumps(run_global_data)), definition_snapshot=snapshot)
         session.add(run)
         try:
             session.commit()
@@ -246,9 +249,13 @@ async def _finish(run_id: int, status: str, error: str | None = None) -> None:
             run.status, run.error, run.finished_at = status, error, utcnow()
             run.current_node_id = run.current_node_name = run.current_node_started_at = None
             session.commit()
-    page = pages.pop(run_id, None)
-    if page and status == "completed":
+    pages.pop(run_id, None)
+    if runtime:
         await runtime.close_page(run_id)
+    current_task = asyncio.current_task()
+    if tasks.get(run_id) is current_task:
+        tasks.pop(run_id, None)
+    cancel_reasons.pop(run_id, None)
 
 
 async def _wait_human(run_id: int, status: str) -> dict:
@@ -500,5 +507,5 @@ async def scheduler_loop() -> None:
                     except (ValueError, KeyError):
                         continue
             for task_id in due_ids:
-                await start_run(task_id, {})
+                await start_run(task_id)
         await asyncio.sleep(5)
